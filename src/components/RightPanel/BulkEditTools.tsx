@@ -373,10 +373,9 @@ const BulkEditTools: React.FC = () => {
                         const toleranceValue = newValue as number;
                         updateTolerance(toleranceValue);
                       }}
-                      // Reduce input event frequency
-                      step={0.0002}
-                        step={0.0001}
-                        min={0.0001}
+                        // Reduce input event frequency with a slightly larger step
+                        step={0.0002}
+                        min={0.0002}
                         max={0.01}
                         valueLabelDisplay="auto"
                         valueLabelFormat={(value) => value.toFixed(4)}
