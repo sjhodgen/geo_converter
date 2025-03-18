@@ -129,10 +129,7 @@ const BulkEditTools: React.FC = () => {
     editMode, 
     simplifySelectedFeatures, 
     originalPointCount, 
-    previewFeatures.length, 
-    setPreviewFeatures, 
-    isSliding, 
-    previewDirty
+    setPreviewFeatures
   ]);
   
   // Update tolerance with immediate preview generation to prevent flashing
@@ -175,7 +172,7 @@ const BulkEditTools: React.FC = () => {
       }
       setIsSliding(false);
     }, 100); // Reduced debounce time for more responsive updates
-  }, [editMode, generatePreview, simplifyTolerance]);
+  }, [editMode, generatePreview, simplifyTolerance, hasSelection, simplifySelectedFeatures, setPreviewFeatures]);
   
   // Clear previews when exiting simplify mode or changing selection
   useEffect(() => {
