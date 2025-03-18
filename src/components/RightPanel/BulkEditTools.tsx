@@ -65,49 +65,89 @@ const BulkEditTools: React.FC = () => {
     return Math.round((1 - (previewPointCount / originalPointCount)) * 100);
   }, [originalPointCount, previewPointCount]);
   
-  // Function to generate preview - with optimized performance
+  // Store previous preview count to detect meaningful changes
+  const prevPreviewCountRef = useRef<number>(0);
+  // Store previous tolerance for deep comparison
+  const prevToleranceRef = useRef<number>(simplifyTolerance);
+  
+  // Convert selected features to simplified preview features
+  const simplifySelectedFeatures = useCallback((tolerance: number): GeoJSONFeature[] => {
+    return selectedFeatures
+      .filter(feature =>
+        feature.geometry.type !== 'MultiPoint' &&
+        ['LineString', 'Polygon', 'MultiLineString', 'MultiPolygon'].includes(feature.geometry.type))
+      .map(feature => {
+        const simplifiedFeature = simplifyFeature(feature, tolerance);
+        if (!simplifiedFeature.properties) {
+          simplifiedFeature.properties = {};
+        }
+        simplifiedFeature.properties._isPreview = true;
+        // Add a stable ID to help with comparison
+        simplifiedFeature.properties._previewId = feature.id;
+        return simplifiedFeature;
+      });
+  }, [selectedFeatures]);
+  
+  // Function to generate preview - completely optimized
   const generatePreview = useCallback(() => {
+    // Don't generate preview if not in simplifying mode or no selection
     if (!hasSelection || editMode !== 'simplifying') return;
     
-    // Skip regenerating if we're actively sliding and already have previews
+    // Skip if we're sliding and already have previews (unless dirty)
     if (isSliding && previewFeatures.length > 0 && !previewDirty) return;
     
     try {
-      // Create simplified versions of the selected features
-      const simplified = selectedFeatures
-        .filter(feature =>
-          feature.geometry.type !== 'MultiPoint' &&
-          ['LineString', 'Polygon', 'MultiLineString', 'MultiPolygon'].includes(feature.geometry.type))
-        .map(feature => {
-          const simplifiedFeature = simplifyFeature(feature, lastToleranceRef.current);
-          if (!simplifiedFeature.properties) {
-            simplifiedFeature.properties = {};
-          }
-          simplifiedFeature.properties._isPreview = true;
-          return simplifiedFeature;
-        });
-      
-      // Only log when not sliding to reduce console spam
-      if (!isSliding) {
-        console.log('Preview updated:', simplified.length, 'Original points:', originalPointCount, 'Preview points:', countTotalPoints(simplified));
+      // Skip generation if tolerance hasn't actually changed
+      if (Math.abs(prevToleranceRef.current - lastToleranceRef.current) < 0.0000001 && 
+          previewFeatures.length > 0 && !previewDirty) {
+        return;
       }
       
-      // Set the preview features and mark as clean
-      setPreviewFeatures(simplified);
-      setPreviewDirty(false);
+      // Create simplified versions of the selected features
+      const simplified = simplifySelectedFeatures(lastToleranceRef.current);
+      
+      // Only update if there's an actual change to avoid re-renders
+      const newPreviewCount = countTotalPoints(simplified);
+      const isFirstPreview = previewFeatures.length === 0;
+      const hasPointCountChanged = newPreviewCount !== prevPreviewCountRef.current;
+      
+      if (isFirstPreview || hasPointCountChanged || previewDirty) {
+        // Only log when meaningful changes happen
+        if (!isSliding || hasPointCountChanged) {
+          console.log('Preview updated:', simplified.length, 'Original points:', originalPointCount, 'Preview points:', newPreviewCount);
+        }
+        
+        // Update refs for next comparison
+        prevPreviewCountRef.current = newPreviewCount;
+        prevToleranceRef.current = lastToleranceRef.current;
+        
+        // Set the preview features and mark as clean
+        setPreviewFeatures(simplified);
+        setPreviewDirty(false);
+      }
     } catch (error) {
       console.error('Error generating preview:', error);
     }
-  }, [hasSelection, editMode, selectedFeatures, originalPointCount, setPreviewFeatures, isSliding, previewFeatures, previewDirty]);
+  }, [
+    hasSelection, 
+    editMode, 
+    simplifySelectedFeatures, 
+    originalPointCount, 
+    previewFeatures.length, 
+    setPreviewFeatures, 
+    isSliding, 
+    previewDirty
+  ]);
   
-  // Update tolerance with more effective throttling
+  // Update tolerance with more effective throttling and debouncing
   const updateTolerance = useCallback((newValue: number) => {
-    // Only mark preview as dirty if the tolerance actually changed
-    if (newValue !== simplifyTolerance) {
-      setPreviewDirty(true);
-    }
+    // Skip unnecessary updates if the value hasn't changed enough
+    if (Math.abs(newValue - simplifyTolerance) < 0.0000001) return;
     
-    // Always update the visible tolerance value immediately for responsive UI
+    // Mark preview as dirty since tolerance is changing
+    setPreviewDirty(true);
+    
+    // Update the visible tolerance value immediately for responsive UI
     setSimplifyTolerance(newValue);
     lastToleranceRef.current = newValue;
     
@@ -118,12 +158,12 @@ const BulkEditTools: React.FC = () => {
     
     // Set a new timeout with longer delay to reduce processing frequency
     timeoutRef.current = setTimeout(() => {
-      if (editMode === 'simplifying' && previewDirty) {
+      if (editMode === 'simplifying') {
         generatePreview();
       }
       setIsSliding(false);
-    }, 750); // Increased debounce time for better performance
-  }, [editMode, generatePreview, simplifyTolerance, previewDirty]);
+    }, 1000); // Further increased debounce time for better performance
+  }, [editMode, generatePreview, simplifyTolerance]);
   
   // Clear previews when exiting simplify mode or changing selection
   useEffect(() => {
@@ -326,14 +366,15 @@ const BulkEditTools: React.FC = () => {
                         aria-labelledby="simplify-tolerance-label"
                         value={simplifyTolerance}
                       onChange={(_, newValue) => {
-                        // Mark that we're sliding and update tolerance with debounce
+                        // Mark that we're sliding 
                         if (!isSliding) setIsSliding(true);
-                        // Only update the tolerance if it's actually changed
+                        
+                        // Only update if the value has meaningfully changed
                         const toleranceValue = newValue as number;
-                        if (toleranceValue !== simplifyTolerance) {
-                          updateTolerance(toleranceValue);
-                        }
+                        updateTolerance(toleranceValue);
                       }}
+                      // Reduce input event frequency
+                      step={0.0002}
                         step={0.0001}
                         min={0.0001}
                         max={0.01}
