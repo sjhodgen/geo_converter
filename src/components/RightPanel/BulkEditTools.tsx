@@ -46,6 +46,7 @@ const BulkEditTools: React.FC = () => {
   const [previewDirty, setPreviewDirty] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastToleranceRef = useRef<number>(simplifyTolerance);
+  const pendingPreviewRef = useRef<GeoJSONFeature[] | null>(null);
   const hasSelection = selectedFeatures.length > 0;
   const isSimplifying = editMode === 'simplifying';
   
@@ -55,8 +56,12 @@ const BulkEditTools: React.FC = () => {
   }, [selectedFeatures]);
   
   // Calculate the total points in preview (simplified) features
+  // Use either the actual preview features or the pending ones if available
   const previewPointCount = useMemo(() => {
-    return countTotalPoints(previewFeatures);
+    const featuresToCount = pendingPreviewRef.current && pendingPreviewRef.current.length > 0 
+      ? pendingPreviewRef.current 
+      : previewFeatures;
+    return countTotalPoints(featuresToCount);
   }, [previewFeatures]);
   
   // Calculate percentage reduction
@@ -88,43 +93,34 @@ const BulkEditTools: React.FC = () => {
       });
   }, [selectedFeatures]);
   
-  // Function to generate preview - completely optimized
+  // Function to generate preview with optimization to prevent flashing
   const generatePreview = useCallback(() => {
     // Don't generate preview if not in simplifying mode or no selection
     if (!hasSelection || editMode !== 'simplifying') return;
     
-    // Skip if we're sliding and already have previews (unless dirty)
-    if (isSliding && previewFeatures.length > 0 && !previewDirty) return;
-    
     try {
-      // Skip generation if tolerance hasn't actually changed
-      if (Math.abs(prevToleranceRef.current - lastToleranceRef.current) < 0.0000001 && 
-          previewFeatures.length > 0 && !previewDirty) {
-        return;
-      }
-      
       // Create simplified versions of the selected features
       const simplified = simplifySelectedFeatures(lastToleranceRef.current);
       
-      // Only update if there's an actual change to avoid re-renders
+      // Calculate point count in new preview
       const newPreviewCount = countTotalPoints(simplified);
-      const isFirstPreview = previewFeatures.length === 0;
-      const hasPointCountChanged = newPreviewCount !== prevPreviewCountRef.current;
       
-      if (isFirstPreview || hasPointCountChanged || previewDirty) {
-        // Only log when meaningful changes happen
-        if (!isSliding || hasPointCountChanged) {
-          console.log('Preview updated:', simplified.length, 'Original points:', originalPointCount, 'Preview points:', newPreviewCount);
-        }
-        
-        // Update refs for next comparison
-        prevPreviewCountRef.current = newPreviewCount;
-        prevToleranceRef.current = lastToleranceRef.current;
-        
-        // Set the preview features and mark as clean
-        setPreviewFeatures(simplified);
-        setPreviewDirty(false);
+      // Store this preview in our ref first, so the point count 
+      // can access it immediately, even before the state updates
+      pendingPreviewRef.current = simplified;
+      
+      // Only log when meaningful changes happen
+      if (newPreviewCount !== prevPreviewCountRef.current) {
+        console.log('Preview updated:', simplified.length, 'Original points:', originalPointCount, 'Preview points:', newPreviewCount);
       }
+      
+      // Update refs for next comparison
+      prevPreviewCountRef.current = newPreviewCount;
+      prevToleranceRef.current = lastToleranceRef.current;
+      
+      // Set the preview features and mark as clean
+      setPreviewFeatures(simplified);
+      setPreviewDirty(false);
     } catch (error) {
       console.error('Error generating preview:', error);
     }
@@ -139,30 +135,46 @@ const BulkEditTools: React.FC = () => {
     previewDirty
   ]);
   
-  // Update tolerance with more effective throttling and debouncing
+  // Update tolerance with immediate preview generation to prevent flashing
   const updateTolerance = useCallback((newValue: number) => {
     // Skip unnecessary updates if the value hasn't changed enough
     if (Math.abs(newValue - simplifyTolerance) < 0.0000001) return;
     
-    // Mark preview as dirty since tolerance is changing
-    setPreviewDirty(true);
-    
     // Update the visible tolerance value immediately for responsive UI
     setSimplifyTolerance(newValue);
     lastToleranceRef.current = newValue;
+    
+    // Generate a preview immediately to avoid flashing
+    // This creates the simplified preview without waiting
+    if (editMode === 'simplifying' && hasSelection) {
+      try {
+        // Create simplified preview immediately but don't update state yet
+        // This allows the UI to continue showing the previous preview
+        // while calculating the new one
+        const simplified = simplifySelectedFeatures(newValue);
+        pendingPreviewRef.current = simplified;
+      } catch (error) {
+        console.error('Error during preview generation:', error);
+      }
+    }
     
     // Clear any existing timeout
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }
     
-    // Set a new timeout with longer delay to reduce processing frequency
+    // Set a new timeout for the actual state update
     timeoutRef.current = setTimeout(() => {
       if (editMode === 'simplifying') {
-        generatePreview();
+        // Now update the state with the calculated preview
+        if (pendingPreviewRef.current) {
+          setPreviewFeatures(pendingPreviewRef.current);
+        } else {
+          generatePreview();
+        }
       }
       setIsSliding(false);
-    }, 1000); // Further increased debounce time for better performance
+    }, 100); // Reduced debounce time for more responsive updates
   }, [editMode, generatePreview, simplifyTolerance]);
   
   // Clear previews when exiting simplify mode or changing selection
@@ -175,15 +187,25 @@ const BulkEditTools: React.FC = () => {
   // Generate previews when entering simplify mode or changing selection while in simplify mode
   useEffect(() => {
     if (editMode === 'simplifying') {
-      // Mark as dirty when first entering simplify mode
-      if (!isSimplifying) {
-        setPreviewDirty(true);
+      // When first entering simplify mode, generate preview immediately
+      // This generates the preview before clearing any previous preview
+      if (hasSelection) {
+        try {
+          // Generate preview immediately when entering simplify mode
+          const simplified = simplifySelectedFeatures(simplifyTolerance);
+          pendingPreviewRef.current = simplified;
+          setPreviewFeatures(simplified);
+        } catch (error) {
+          console.error('Error generating initial preview:', error);
+        }
       }
-      generatePreview();
     } else {
+      // Only clear previews when explicitly leaving simplify mode
+      pendingPreviewRef.current = null;
       clearPreviewFeatures();
     }
-  }, [editMode, selectedFeatures, generatePreview, clearPreviewFeatures, isSimplifying]);
+  }, [editMode, selectedFeatures, simplifySelectedFeatures, setPreviewFeatures, 
+      clearPreviewFeatures, simplifyTolerance, hasSelection]);
   
   // Cleanup on unmount
   useEffect(() => {
@@ -195,8 +217,17 @@ const BulkEditTools: React.FC = () => {
     };
   }, [clearPreviewFeatures]);
   
-  // Enter simplification mode
+  // Enter simplification mode with immediate preview generation
   const enterSimplifyMode = () => {
+    // Generate preview immediately before changing mode
+    if (hasSelection) {
+      try {
+        const simplified = simplifySelectedFeatures(simplifyTolerance);
+        pendingPreviewRef.current = simplified;
+      } catch (error) {
+        console.error('Error preparing simplification preview:', error);
+      }
+    }
     setEditMode('simplifying');
   };
   
