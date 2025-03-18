@@ -43,6 +43,7 @@ const BulkEditTools: React.FC = () => {
   // State for simplification tool
   const [simplifyTolerance, setSimplifyTolerance] = useState<number>(0.001);
   const [isSliding, setIsSliding] = useState(false);
+  const [previewDirty, setPreviewDirty] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastToleranceRef = useRef<number>(simplifyTolerance);
   const hasSelection = selectedFeatures.length > 0;
@@ -68,8 +69,8 @@ const BulkEditTools: React.FC = () => {
   const generatePreview = useCallback(() => {
     if (!hasSelection || editMode !== 'simplifying') return;
     
-    // Skip generating preview while actively sliding to improve performance
-    if (isSliding && previewFeatures.length > 0) return;
+    // Skip regenerating if we're actively sliding and already have previews
+    if (isSliding && previewFeatures.length > 0 && !previewDirty) return;
     
     try {
       // Create simplified versions of the selected features
@@ -91,15 +92,21 @@ const BulkEditTools: React.FC = () => {
         console.log('Preview updated:', simplified.length, 'Original points:', originalPointCount, 'Preview points:', countTotalPoints(simplified));
       }
       
-      // Set the preview features
+      // Set the preview features and mark as clean
       setPreviewFeatures(simplified);
+      setPreviewDirty(false);
     } catch (error) {
       console.error('Error generating preview:', error);
     }
-  }, [hasSelection, editMode, selectedFeatures, originalPointCount, setPreviewFeatures, isSliding, previewFeatures]);
+  }, [hasSelection, editMode, selectedFeatures, originalPointCount, setPreviewFeatures, isSliding, previewFeatures, previewDirty]);
   
   // Update tolerance with more effective throttling
   const updateTolerance = useCallback((newValue: number) => {
+    // Only mark preview as dirty if the tolerance actually changed
+    if (newValue !== simplifyTolerance) {
+      setPreviewDirty(true);
+    }
+    
     // Always update the visible tolerance value immediately for responsive UI
     setSimplifyTolerance(newValue);
     lastToleranceRef.current = newValue;
@@ -111,12 +118,12 @@ const BulkEditTools: React.FC = () => {
     
     // Set a new timeout with longer delay to reduce processing frequency
     timeoutRef.current = setTimeout(() => {
-      if (editMode === 'simplifying') {
+      if (editMode === 'simplifying' && previewDirty) {
         generatePreview();
       }
       setIsSliding(false);
-    }, 500); // Increased debounce time to 500ms for better performance
-  }, [editMode, generatePreview]);
+    }, 750); // Increased debounce time for better performance
+  }, [editMode, generatePreview, simplifyTolerance, previewDirty]);
   
   // Clear previews when exiting simplify mode or changing selection
   useEffect(() => {
@@ -128,11 +135,15 @@ const BulkEditTools: React.FC = () => {
   // Generate previews when entering simplify mode or changing selection while in simplify mode
   useEffect(() => {
     if (editMode === 'simplifying') {
+      // Mark as dirty when first entering simplify mode
+      if (!isSimplifying) {
+        setPreviewDirty(true);
+      }
       generatePreview();
     } else {
       clearPreviewFeatures();
     }
-  }, [editMode, selectedFeatures, generatePreview, clearPreviewFeatures]);
+  }, [editMode, selectedFeatures, generatePreview, clearPreviewFeatures, isSimplifying]);
   
   // Cleanup on unmount
   useEffect(() => {
@@ -314,11 +325,15 @@ const BulkEditTools: React.FC = () => {
                       <Slider
                         aria-labelledby="simplify-tolerance-label"
                         value={simplifyTolerance}
-                        onChange={(_, newValue) => {
-                          // Mark that we're sliding and update tolerance with debounce
-                          if (!isSliding) setIsSliding(true);
-                          updateTolerance(newValue as number);
-                        }}
+                      onChange={(_, newValue) => {
+                        // Mark that we're sliding and update tolerance with debounce
+                        if (!isSliding) setIsSliding(true);
+                        // Only update the tolerance if it's actually changed
+                        const toleranceValue = newValue as number;
+                        if (toleranceValue !== simplifyTolerance) {
+                          updateTolerance(toleranceValue);
+                        }
+                      }}
                         step={0.0001}
                         min={0.0001}
                         max={0.01}
