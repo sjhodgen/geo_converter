@@ -284,7 +284,7 @@ const PreviewLayer: React.FC<{
     // Make preview features stand out with distinct styling
     return {
       ...baseStyle,
-      zIndex: 1000, // Ensure they're on top
+      // zIndex not supported in PathOptions - need to use renderer options or layer management instead
       opacity: 0.9, // More opaque for stability
       fillOpacity: 0.4, // More visible
       weight: 2.5, // Slightly thicker lines
