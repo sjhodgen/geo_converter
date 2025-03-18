@@ -274,20 +274,24 @@ const PreviewLayer: React.FC<{
   const map = useMap();
   
   // Stable style function to prevent recreation on each render
-  const getPreviewStyle = React.useCallback((feature: any) => ({
-    ...getFeatureStyle(
+  const getPreviewStyle = React.useCallback((feature: any): PathOptions => {
+    const baseStyle = getFeatureStyle(
       feature,
       false, // Not selected
       true   // Preview
-    ),
+    );
+    
     // Make preview features stand out with distinct styling
-    zIndex: 1000, // Ensure they're on top
-    opacity: 0.9, // More opaque for stability
-    fillOpacity: 0.4, // More visible
-    weight: 2.5, // Slightly thicker lines
-    // Use solid lines instead of dashed to prevent visual flashing
-    dashArray: null 
-  }), [getFeatureStyle]);
+    return {
+      ...baseStyle,
+      zIndex: 1000, // Ensure they're on top
+      opacity: 0.9, // More opaque for stability
+      fillOpacity: 0.4, // More visible
+      weight: 2.5, // Slightly thicker lines
+      // Use solid lines instead of dashed to prevent visual flashing
+      dashArray: undefined
+    };
+  }, [getFeatureStyle]);
 
   // Handle layer updates more efficiently
   useEffect(() => {
@@ -312,7 +316,8 @@ const PreviewLayer: React.FC<{
         geoJsonLayerRef.current.addData(previewFeatures as any);
         
         // Update styles for all layers to ensure consistency
-        geoJsonLayerRef.current.setStyle(getPreviewStyle);
+        // Cast the style function to the expected type
+        geoJsonLayerRef.current.setStyle((feature) => getPreviewStyle(feature));
       }
     } else if (geoJsonLayerRef.current) {
       // Clear the layer but don't remove it
