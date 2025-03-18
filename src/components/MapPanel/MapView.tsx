@@ -270,8 +270,13 @@ const MapView: React.FC = () => {
               opacity: 0.8, // Slightly more opaque
               fillOpacity: 0.4 // More visible
             })}
-            // Use static key to prevent unnecessary re-renders while tolerance isn't changing
+            // Use React.memo pattern with static key to prevent unnecessary re-renders
             key="preview-layer"
+            eventHandlers={{}} // Empty event handlers to prevent default listeners
+            bubblingMouseEvents={true} // Prevent event capturing which can cause re-renders
+            pathOptions={{ // Set options directly to avoid recalculation
+              interactive: false // Make preview non-interactive for better performance
+            }}
             // Don't add click handlers to preview features
             onEachFeature={(feature, layer) => {
               if (feature.properties) {
