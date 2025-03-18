@@ -270,7 +270,8 @@ const MapView: React.FC = () => {
               opacity: 0.8, // Slightly more opaque
               fillOpacity: 0.4 // More visible
             })}
-            key={`preview-${previewFeatures.length}`} // Key based only on content changes, not time
+            // Use static key to prevent unnecessary re-renders while tolerance isn't changing
+            key="preview-layer"
             // Don't add click handlers to preview features
             onEachFeature={(feature, layer) => {
               if (feature.properties) {
