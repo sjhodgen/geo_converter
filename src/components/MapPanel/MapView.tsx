@@ -254,41 +254,95 @@ const MapView: React.FC = () => {
           />
         )}
         
-        {/* Render the preview features */}
-        {previewFeatures.length > 0 && (
-          <GeoJSON
-            data={previewFeatures as any}
-            style={(feature) => ({
-              ...getFeatureStyle(
-                feature,
-                false, // Not selected
-                true   // Preview
-              ),
-              // Make preview features stand out with distinct styling
-              dashArray: '5, 5', // Dashed lines
-              zIndex: 1000, // Ensure they're on top
-              opacity: 0.8, // Slightly more opaque
-              fillOpacity: 0.4 // More visible
-            })}
-            // Use React.memo pattern with static key to prevent unnecessary re-renders
-            key="preview-layer"
-            eventHandlers={{}} // Empty event handlers to prevent default listeners
-            bubblingMouseEvents={true} // Prevent event capturing which can cause re-renders
-            pathOptions={{ // Set options directly to avoid recalculation
-              interactive: false // Make preview non-interactive for better performance
-            }}
-            // Don't add click handlers to preview features
-            onEachFeature={(feature, layer) => {
-              if (feature.properties) {
-                const name = feature.properties.name || feature.properties.NAME || feature.id || 'Preview';
-                layer.bindTooltip(`${name} (Simplified)`);
-              }
-            }}
-          />
-        )}
+        {/* Always render the preview layer container to prevent unmounting/remounting */}
+        <PreviewLayer 
+          previewFeatures={previewFeatures} 
+          getFeatureStyle={getFeatureStyle} 
+        />
       </MapContainer>
     </Box>
   );
 };
+
+// Dedicated component for preview features to improve rendering stability
+const PreviewLayer: React.FC<{
+  previewFeatures: GeoJSONFeature[];
+  getFeatureStyle: (feature: any, isSelected: boolean, isPreview?: boolean) => PathOptions;
+}> = React.memo(({ previewFeatures, getFeatureStyle }) => {
+  // Use refs to maintain stable references and prevent flashing
+  const geoJsonLayerRef = React.useRef<L.GeoJSON | null>(null);
+  const map = useMap();
+  
+  // Stable style function to prevent recreation on each render
+  const getPreviewStyle = React.useCallback((feature: any) => ({
+    ...getFeatureStyle(
+      feature,
+      false, // Not selected
+      true   // Preview
+    ),
+    // Make preview features stand out with distinct styling
+    zIndex: 1000, // Ensure they're on top
+    opacity: 0.9, // More opaque for stability
+    fillOpacity: 0.4, // More visible
+    weight: 2.5, // Slightly thicker lines
+    // Use solid lines instead of dashed to prevent visual flashing
+    dashArray: null 
+  }), [getFeatureStyle]);
+
+  // Handle layer updates more efficiently
+  useEffect(() => {
+    // Create or update the GeoJSON layer
+    if (previewFeatures.length > 0) {
+      // Create a new layer if it doesn't exist
+      if (!geoJsonLayerRef.current) {
+        geoJsonLayerRef.current = L.geoJSON(previewFeatures as any, {
+          style: getPreviewStyle,
+          interactive: false,
+          bubblingMouseEvents: true,
+          onEachFeature: (feature, layer) => {
+            if (feature.properties) {
+              const name = feature.properties.name || feature.properties.NAME || feature.id || 'Preview';
+              layer.bindTooltip(`${name} (Simplified)`);
+            }
+          }
+        }).addTo(map);
+      } else {
+        // Update the existing layer's data instead of recreating it
+        geoJsonLayerRef.current.clearLayers();
+        geoJsonLayerRef.current.addData(previewFeatures as any);
+        
+        // Update styles for all layers to ensure consistency
+        geoJsonLayerRef.current.setStyle(getPreviewStyle);
+      }
+    } else if (geoJsonLayerRef.current) {
+      // Clear the layer but don't remove it
+      geoJsonLayerRef.current.clearLayers();
+    }
+    
+    // Cleanup function to remove the layer when component unmounts
+    return () => {
+      if (geoJsonLayerRef.current) {
+        // Don't remove the layer immediately to prevent flashing
+        // Just clear it so it can be reused
+        geoJsonLayerRef.current.clearLayers();
+      }
+    };
+  }, [previewFeatures, map, getPreviewStyle]);
+
+  // No need to render anything here since we're using the ref approach
+  return null;
+}, (prevProps, nextProps) => {
+  // Custom comparison logic to prevent unnecessary re-renders
+  // Only update if the number of features changes or feature IDs change
+  if (prevProps.previewFeatures.length !== nextProps.previewFeatures.length) {
+    return false; // re-render
+  }
+  
+  // Further optimization: check if the actual features have changed
+  // This prevents re-renders when the reference changes but content is the same
+  const prevIds = prevProps.previewFeatures.map(f => f.id).join(',');
+  const nextIds = nextProps.previewFeatures.map(f => f.id).join(',');
+  return prevIds === nextIds; // true = don't re-render
+});
 
 export default MapView;
