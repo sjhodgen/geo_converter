@@ -338,16 +338,25 @@ const PreviewLayer: React.FC<{
   return null;
 }, (prevProps, nextProps) => {
   // Custom comparison logic to prevent unnecessary re-renders
-  // Only update if the number of features changes or feature IDs change
+  // First check if the number of features has changed
   if (prevProps.previewFeatures.length !== nextProps.previewFeatures.length) {
     return false; // re-render
   }
   
-  // Further optimization: check if the actual features have changed
-  // This prevents re-renders when the reference changes but content is the same
-  const prevIds = prevProps.previewFeatures.map(f => f.id).join(',');
-  const nextIds = nextProps.previewFeatures.map(f => f.id).join(',');
-  return prevIds === nextIds; // true = don't re-render
+  // Check if the geometries have changed by comparing coordinates
+  // This is critical for simplification preview where only geometry changes
+  for (let i = 0; i < prevProps.previewFeatures.length; i++) {
+    // Stringify geometries to detect coordinate changes
+    const prevGeom = JSON.stringify(prevProps.previewFeatures[i].geometry);
+    const nextGeom = JSON.stringify(nextProps.previewFeatures[i].geometry);
+    
+    if (prevGeom !== nextGeom) {
+      return false; // re-render if any geometry has changed
+    }
+  }
+  
+  // If we got here, no geometries have changed
+  return true; // don't re-render
 });
 
 export default MapView;
