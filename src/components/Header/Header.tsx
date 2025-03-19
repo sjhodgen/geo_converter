@@ -14,7 +14,7 @@ const Header: React.FC<HeaderProps> = ({ version }) => {
         </Typography>
         <Box>
           <Typography variant="caption" color="text.secondary">
-            Version: {version}
+            &nbsp;&nbsp;&nbsp;Version: {version}
           </Typography>
         </Box>
       </Toolbar>
